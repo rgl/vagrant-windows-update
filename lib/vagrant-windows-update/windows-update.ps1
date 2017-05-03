@@ -62,10 +62,14 @@ function Wait-Condition {
     }
 }
 
-function ExitWhenRebootRequired {
+function ExitWhenRebootRequired([bool]$forceReboot=$false) {
+    $rebootRequired = $forceReboot
+
     # check for pending Windows Updates.
-    $systemInformation = New-Object -ComObject 'Microsoft.Update.SystemInfo'
-    $rebootRequired = $systemInformation.RebootRequired
+    if (!$rebootRequired) {
+        $systemInformation = New-Object -ComObject 'Microsoft.Update.SystemInfo'
+        $rebootRequired = $rebootRequired -or $systemInformation.RebootRequired
+    }
 
     # check for pending Windows Features.
     if (!$rebootRequired) {
@@ -75,8 +79,10 @@ function ExitWhenRebootRequired {
     }
 
     if ($rebootRequired) {
-        Write-Output 'Pending Reboot detected. Waiting for the Windows Modules Installer to exit...'
-        Wait-Condition {(Get-Process -ErrorAction SilentlyContinue TiWorker,TrustedInstaller | Measure-Object).Count -eq 0}
+        if (!$forceReboot) {
+            Write-Output 'Pending Reboot detected. Waiting for the Windows Modules Installer to exit...'
+            Wait-Condition {(Get-Process -ErrorAction SilentlyContinue TiWorker,TrustedInstaller | Measure-Object).Count -eq 0}
+        }
         Write-Output 'Rebooting...'
         Exit 0
     }
@@ -132,9 +138,7 @@ if ($searchResult.Updates.Count) {
         $updateInstaller = $updateSession.CreateUpdateInstaller()
         $updateInstaller.Updates = $updatesToInstall
         $installResult = $updateInstaller.Install()
-        if ($installResult.RebootRequired) {
-            ExitWhenRebootRequired
-        }
+        ExitWhenRebootRequired $true
     }
 } else {
     Write-Output 'No Windows updates found'
