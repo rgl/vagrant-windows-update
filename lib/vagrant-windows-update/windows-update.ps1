@@ -94,8 +94,9 @@ $updateSession = New-Object -ComObject 'Microsoft.Update.Session'
 $updateSession.ClientApplicationID = 'vagrant-windows-update'
 
 Write-Output 'Searching for Windows updates...'
-$updateSearcher = $updateSession.CreateUpdateSearcher()
 $updatesToDownload = New-Object -ComObject 'Microsoft.Update.UpdateColl'
+$updatesToInstall = New-Object -ComObject 'Microsoft.Update.UpdateColl'
+$updateSearcher = $updateSession.CreateUpdateSearcher()
 $searchResult = $updateSearcher.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
 for ($i = 0; $i -lt $searchResult.Updates.Count; ++$i) {
     $update = $searchResult.Updates.Item($i)
@@ -110,11 +111,11 @@ for ($i = 0; $i -lt $searchResult.Updates.Count; ++$i) {
 
     $update.AcceptEula() | Out-Null
 
-    if ($update.IsDownloaded) {
-        continue
+    if (!$update.IsDownloaded) {
+        $updatesToDownload.Add($update) | Out-Null
     }
 
-    $updatesToDownload.Add($update) | Out-Null
+    $updatesToInstall.Add($update) | Out-Null
 }
 
 if ($updatesToDownload.Count) {
@@ -122,14 +123,6 @@ if ($updatesToDownload.Count) {
     $updateDownloader = $updateSession.CreateUpdateDownloader()
     $updateDownloader.Updates = $updatesToDownload
     $updateDownloader.Download() | Out-Null
-}
-
-$updatesToInstall = New-Object -ComObject 'Microsoft.Update.UpdateColl'
-for ($i = 0; $i -lt $searchResult.Updates.Count; ++$i) {
-    $update = $searchResult.Updates.Item($i)
-    if ($update.IsDownloaded) {
-        $updatesToInstall.Add($update) | Out-Null
-    }
 }
 
 if ($updatesToInstall.Count) {
