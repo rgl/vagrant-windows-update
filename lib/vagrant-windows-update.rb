@@ -8,21 +8,46 @@ if Vagrant::VERSION < "2.0.3"
   raise "The Vagrant Windows Update plugin is only compatible with Vagrant 2.0.3+"
 end
 
+require "base64"
+
 module VagrantPlugins
   module WindowsUpdate
     class Plugin < Vagrant.plugin("2")
       name "Windows Update"
       description "Vagrant plugin to update a Windows VM as a provisioning step."
 
-      provisioner "windows-update" do
+      config("windows-update", :provisioner) do
+        class Config < Vagrant.plugin("2", :config)
+          attr_accessor :filters
+
+          def initialize
+            @filters = UNSET_VALUE
+          end
+
+          def finalize!
+            @filters = ['include:$_.AutoSelectOnWebSites'] if @filters == UNSET_VALUE
+          end
+
+          def validate(machine)
+            errors = _detected_errors
+            errors << 'filters must be a string array' unless filters_valid?
+            return { "windows-update provisioner" => errors }
+          end
+
+          def filters_valid?
+            return false if !filters.is_a?(Array)
+            filters.each do |a|
+              return false if !a.kind_of?(String)
+            end
+            return true
+          end
+        end
+
+        Config
+      end
+
+      provisioner("windows-update") do
         class Provisioner < Vagrant.plugin("2", :provisioner)
-          def initialize(machine, config)
-            super
-          end
-
-          def configure(root_config)
-          end
-
           # see https://github.com/mitchellh/vagrant/blob/master/lib/vagrant/ui.rb
           # see https://github.com/mitchellh/vagrant/blob/master/lib/vagrant/plugin/v2/provisioner.rb
           # see https://github.com/mitchellh/vagrant/blob/master/lib/vagrant/plugin/v2/communicator.rb
@@ -32,7 +57,7 @@ module VagrantPlugins
             @machine.communicate.upload(
               File.join(File.dirname(__FILE__), "vagrant-windows-update", "windows-update.ps1"),
               remote_path)
-            command = "PowerShell -ExecutionPolicy Bypass -OutputFormat Text -File #{remote_path}"
+            command = "PowerShell -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand #{windows_update_encoded_command(remote_path, config.filters)}"
             loop do
               begin
                 until @machine.communicate.ready?
@@ -84,6 +109,22 @@ module VagrantPlugins
 
               @machine.ui.info(data.chomp, options)
             end
+          end
+
+          def windows_update_encoded_command(remote_path, filters)
+            # NB you can get the string back with:
+            #     Base64.decode64(encoded).force_encoding("utf-16le")
+            return Base64.strict_encode64("#{remote_path}#{windows_update_filters_argument(filters)}".encode("utf-16le"))
+          end
+
+          def windows_update_filters_argument(filters)
+            return "" if !filters
+            arg = " -Filters "
+            filters.each_with_index do |filter, i|
+              arg += "," if i > 0
+              arg += "'#{filter.gsub("'", "''")}'" # escape single quotes with another single quote.
+            end
+            return arg
           end
         end
 

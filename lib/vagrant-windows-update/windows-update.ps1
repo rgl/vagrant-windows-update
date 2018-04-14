@@ -13,6 +13,18 @@
 # see IUpdate interface
 #     at https://msdn.microsoft.com/en-us/library/windows/desktop/aa386099(v=vs.85).aspx
 
+param(
+    [string[]]$Filters = @('include:$_.AutoSelectOnWebSites'),
+    [int]$UpdateLimit = 100
+)
+
+$mock = $false
+
+function ExitWithCode($exitCode) {
+    $host.SetShouldExit($exitCode)
+    Exit
+}
+
 Set-StrictMode -Version Latest
 
 $ErrorActionPreference = 'Stop'
@@ -21,7 +33,23 @@ trap {
     Write-Output "ERROR: $_"
     Write-Output (($_.ScriptStackTrace -split '\r?\n') -replace '^(.*)$','ERROR: $1')
     Write-Output (($_.Exception.ToString() -split '\r?\n') -replace '^(.*)$','ERROR EXCEPTION: $1')
-    Exit 1
+    ExitWithCode 1
+}
+
+if ($mock) {
+    $mockWindowsUpdatePath = 'C:\Windows\Temp\windows-update-count-mock.txt'
+    if (!(Test-Path $mockWindowsUpdatePath)) {
+        Set-Content $mockWindowsUpdatePath 10
+    }
+    $count = [int]::Parse((Get-Content $mockWindowsUpdatePath).Trim())
+    if ($count) {
+        Write-Output "Synthetic reboot countdown counter is at $count"
+        Set-Content $mockWindowsUpdatePath (--$count)
+        Write-Output 'Rebooting...'
+        ExitWithCode 101
+    }
+    Write-Output 'No Windows updates found'
+    ExitWithCode 0
 }
 
 Add-Type @'
@@ -62,33 +90,46 @@ function Wait-Condition {
     }
 }
 
-function ExitWhenRebootRequired([bool]$forceReboot=$false) {
-    $rebootRequired = $forceReboot
-
+function ExitWhenRebootRequired($rebootRequired = $false) {
     # check for pending Windows Updates.
     if (!$rebootRequired) {
         $systemInformation = New-Object -ComObject 'Microsoft.Update.SystemInfo'
-        $rebootRequired = $rebootRequired -or $systemInformation.RebootRequired
+        $rebootRequired = $systemInformation.RebootRequired
     }
 
     # check for pending Windows Features.
     if (!$rebootRequired) {
         $pendingPackagesKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending'
         $pendingPackagesCount = (Get-ChildItem -ErrorAction SilentlyContinue $pendingPackagesKey | Measure-Object).Count
-        $rebootRequired = $rebootRequired -or $pendingPackagesCount -gt 0
+        $rebootRequired = $pendingPackagesCount -gt 0
     }
 
     if ($rebootRequired) {
-        if (!$forceReboot) {
-            Write-Output 'Pending Reboot detected. Waiting for the Windows Modules Installer to exit...'
-            Wait-Condition {(Get-Process -ErrorAction SilentlyContinue TiWorker,TrustedInstaller | Measure-Object).Count -eq 0}
-        }
+        Write-Output 'Pending Reboot detected. Waiting for the Windows Modules Installer to exit...'
+        Wait-Condition {(Get-Process -ErrorAction SilentlyContinue TiWorker | Measure-Object).Count -eq 0}
         Write-Output 'Rebooting...'
-        Exit 0
+        ExitWithCode 101
     }
 }
 
 ExitWhenRebootRequired
+
+$updateFilters = $Filters | ForEach-Object {
+    $action, $expression = $_ -split ':',2
+    New-Object PSObject -Property @{
+        Action = $action
+        Expression = [ScriptBlock]::Create($expression)
+    }
+}
+
+function Test-IncludeUpdate($filters, $update) {
+    foreach ($filter in $filters) {
+        if (Where-Object -InputObject $update $filter.Expression) {
+            return $filter.Action -eq 'include'
+        }
+    }
+    return $false
+}
 
 $updateSession = New-Object -ComObject 'Microsoft.Update.Session'
 $updateSession.ClientApplicationID = 'vagrant-windows-update'
@@ -98,20 +139,24 @@ $updatesToDownload = New-Object -ComObject 'Microsoft.Update.UpdateColl'
 $updatesToInstall = New-Object -ComObject 'Microsoft.Update.UpdateColl'
 $updateSearcher = $updateSession.CreateUpdateSearcher()
 $searchResult = $updateSearcher.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
+$rebootRequired = $false
 for ($i = 0; $i -lt $searchResult.Updates.Count; ++$i) {
     $update = $searchResult.Updates.Item($i)
-
-    if ($update.InstallationBehavior.CanRequestUserInput) {
-        continue
-    }
-
-    if (!$update.AutoSelectOnWebSites) {
-        continue
-    }
-
     $updateDate = $update.LastDeploymentChangeTime.ToString('yyyy-MM-dd')
     $updateSize = ($update.MaxDownloadSize/1024/1024).ToString('0.##')
-    Write-Output "Found Windows update ($updateDate; $updateSize MB): $($update.Title)"
+    $updateSummary = "Windows update ($updateDate; $updateSize MB): $($update.Title)"
+
+    if ($update.InstallationBehavior.CanRequestUserInput) {
+        Write-Output "Skipped (CanRequestUserInput) $updateSummary"
+        continue
+    }
+
+    if (!(Test-IncludeUpdate $updateFilters $update)) {
+        Write-Output "Skipped (filter) $updateSummary"
+        continue
+    }
+
+    Write-Output "Found $updateSummary"
 
     $update.AcceptEula() | Out-Null
 
@@ -120,6 +165,10 @@ for ($i = 0; $i -lt $searchResult.Updates.Count; ++$i) {
     }
 
     $updatesToInstall.Add($update) | Out-Null
+    if ($updatesToInstall.Count -ge $UpdateLimit) {
+        $rebootRequired = $true
+        break
+    }
 }
 
 if ($updatesToDownload.Count) {
@@ -134,8 +183,7 @@ if ($updatesToInstall.Count) {
     $updateInstaller = $updateSession.CreateUpdateInstaller()
     $updateInstaller.Updates = $updatesToInstall
     $installResult = $updateInstaller.Install()
-    ExitWhenRebootRequired $true
-    Exit 0
+    ExitWhenRebootRequired ($installResult.RebootRequired -or $rebootRequired)
+} else {
+    Write-Output 'No Windows updates found'
 }
-
-Write-Output 'No Windows updates found'
