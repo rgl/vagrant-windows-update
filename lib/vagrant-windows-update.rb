@@ -4,8 +4,8 @@ rescue LoadError
   raise "The Vagrant Windows Update plugin must be run within Vagrant."
 end
 
-if Vagrant::VERSION < "1.9.0"
-  raise "The Vagrant Windows Update plugin is only compatible with Vagrant 1.9+"
+if Vagrant::VERSION < "2.0.3"
+  raise "The Vagrant Windows Update plugin is only compatible with Vagrant 2.0.3+"
 end
 
 module VagrantPlugins

@@ -5,7 +5,7 @@
 
 This is a Vagrant plugin for installing Windows updates.
 
-**NB** This was only tested with Vagrant 1.9.2 and Windows Server 2016.
+**NB** This was only tested with Vagrant 2.0.3 and Windows Server 2016.
 
 # Installation
 
