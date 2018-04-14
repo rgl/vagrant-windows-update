@@ -46,7 +46,7 @@ if ($mock) {
         Write-Output "Synthetic reboot countdown counter is at $count"
         Set-Content $mockWindowsUpdatePath (--$count)
         Write-Output 'Rebooting...'
-        ExitWithCode 101
+        ExitWithCode 0
     }
     Write-Output 'No Windows updates found'
     ExitWithCode 0
@@ -108,7 +108,7 @@ function ExitWhenRebootRequired($rebootRequired = $false) {
         Write-Output 'Pending Reboot detected. Waiting for the Windows Modules Installer to exit...'
         Wait-Condition {(Get-Process -ErrorAction SilentlyContinue TiWorker | Measure-Object).Count -eq 0}
         Write-Output 'Rebooting...'
-        ExitWithCode 101
+        ExitWithCode 0
     }
 }
 

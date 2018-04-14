@@ -24,7 +24,7 @@ GIT
 PATH
   remote: .
   specs:
-    vagrant-windows-update (0.0.6)
+    vagrant-windows-update (0.0.7)
 
 GEM
   remote: https://rubygems.org/
