@@ -19,13 +19,16 @@ module VagrantPlugins
       config("windows-update", :provisioner) do
         class Config < Vagrant.plugin("2", :config)
           attr_accessor :filters
+          attr_accessor :keep_color
 
           def initialize
             @filters = UNSET_VALUE
+            @keep_color = UNSET_VALUE
           end
 
           def finalize!
             @filters = ['include:$_.AutoSelectOnWebSites'] if @filters == UNSET_VALUE
+            @keep_color = false if @keep_color == UNSET_VALUE
           end
 
           def validate(machine)
